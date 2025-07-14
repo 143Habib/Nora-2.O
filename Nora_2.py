@@ -82,8 +82,8 @@ def execute_command(command):
 def main():
     print("Hello,I am Nora.How can I help You?")
     speak("Hello.....I am Nora.....How can I help You?")
-    x=print("Do you want to type or want to tell your command?")
-    y=input("Write T for text or L for Listen:")
+    print("How would you like to give your command?")
+    y = input("Type 'T' to write or 'L' to speak: ")
     if y=='T':
         while True:
          user_input1 = listen()
