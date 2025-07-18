@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import webbrowser
 import requests
 import pyttsx3
@@ -11,21 +11,31 @@ import threading
 from datetime import datetime
 import re
 import subprocess
+from PIL import Image, ImageTk
+import io
+import base64
+
 # ------------------- CONFIG -------------------
 GROQ_API_KEY = "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"  
 GROQ_MODEL = "llama3-8b-8192"
+
+# Add your image generation API key here 
+OPENAI_API_KEY = "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"  # For DALL-E
+STABILITY_API_KEY = "sk-Q7VR50R8lspjkXB9WhDVgMfFr15lIoLiuAI9zhbhAEPs8Ocl"  # For Stable Diffusion
+HUGGINGFACE_API_KEY = "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"  # For Hugging Face models
 # ----------------------------------------------
 
 class NoraInterface:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("N.O.R.A Interface")
-        self.root.geometry("1200x700")
+        self.root.geometry("1400x800")  # Made wider for image display
         self.root.config(bg="#000000")
         
         # Initialize TTS engine
         self.engine = pyttsx3.init()
         self.is_listening = False
+        self.current_image = None
         
         self.setup_ui()
         
@@ -43,31 +53,66 @@ class NoraInterface:
                                    fg="#00ff00", bg="#000000", font=("Consolas", 12))
         self.status_label.pack()
         
-        # ======= Info Frame =======
-        info_frame = tk.Frame(self.root, bg="#000000")
-        info_frame.pack(pady=20)
+        # ======= Main Content Frame =======
+        main_frame = tk.Frame(self.root, bg="#000000")
+        main_frame.pack(pady=20, fill="both", expand=True)
+        
+        # ======= Left Side - Text Response =======
+        left_frame = tk.Frame(main_frame, bg="#000000")
+        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
         # Response Box
-        response_label = tk.Label(info_frame, text="Assistant Response:", 
+        response_label = tk.Label(left_frame, text="Assistant Response:", 
                                 fg="#00ffe0", bg="#000000", font=("Consolas", 14))
-        response_label.grid(row=0, column=0, sticky='w')
+        response_label.pack(anchor="w")
         
-        self.response_text = tk.Text(info_frame, height=12, width=100, 
+        self.response_text = tk.Text(left_frame, height=15, width=80, 
                                    bg="#0d0d0d", fg="#00ffcc", font=("Consolas", 11), 
                                    borderwidth=2, relief="solid")
-        self.response_text.grid(row=1, column=0, padx=10, pady=10)
+        self.response_text.pack(pady=10, fill="both", expand=True)
         
-        # Add scrollbar
-        scrollbar = tk.Scrollbar(info_frame, command=self.response_text.yview)
-        scrollbar.grid(row=1, column=1, sticky='ns')
+        # Add scrollbar for text
+        scrollbar = tk.Scrollbar(left_frame, command=self.response_text.yview)
+        scrollbar.pack(side="right", fill="y")
         self.response_text.config(yscrollcommand=scrollbar.set)
+        
+        # ======= Right Side - Image Display =======
+        right_frame = tk.Frame(main_frame, bg="#000000")
+        right_frame.pack(side="right", fill="both", expand=True, padx=(10, 0))
+        
+        # Image Box
+        image_label = tk.Label(right_frame, text="Generated Images:", 
+                             fg="#00ffe0", bg="#000000", font=("Consolas", 14))
+        image_label.pack(anchor="w")
+        
+        # Image display area
+        self.image_frame = tk.Frame(right_frame, bg="#0d0d0d", borderwidth=2, relief="solid")
+        self.image_frame.pack(pady=10, fill="both", expand=True)
+        
+        self.image_label = tk.Label(self.image_frame, text="No image generated yet", 
+                                  fg="#00ffcc", bg="#0d0d0d", font=("Consolas", 12))
+        self.image_label.pack(expand=True)
+        
+        # Image control buttons
+        img_button_frame = tk.Frame(right_frame, bg="#000000")
+        img_button_frame.pack(pady=5)
+        
+        save_img_btn = tk.Button(img_button_frame, text="Save Image", 
+                               command=self.save_current_image, 
+                               bg="#00ff80", fg="black", font=("Consolas", 11), width=12)
+        save_img_btn.pack(side="left", padx=5)
+        
+        clear_img_btn = tk.Button(img_button_frame, text="Clear Image", 
+                                command=self.clear_image, 
+                                bg="#ff4080", fg="white", font=("Consolas", 11), width=12)
+        clear_img_btn.pack(side="left", padx=5)
         
         # ======= Command Input Box =======
         command_label = tk.Label(self.root, text="Enter Command:", 
                                 fg="#00ffe0", bg="#000000", font=("Consolas", 14))
         command_label.pack()
         
-        self.command_entry = tk.Entry(self.root, width=80, font=("Consolas", 14), 
+        self.command_entry = tk.Entry(self.root, width=100, font=("Consolas", 14), 
                                     bg="#111111", fg="#ffffff", insertbackground='white')
         self.command_entry.pack(pady=10)
         self.command_entry.bind('<Return>', lambda event: self.run_command())
@@ -97,10 +142,16 @@ class NoraInterface:
                                 bg="#4000ff", fg="white", font=("Consolas", 13), width=12)
         self.mute_btn.grid(row=0, column=3, padx=5)
         
+        # Generate Image Button
+        generate_img_btn = tk.Button(button_frame, text="🎨 Generate Image", 
+                                   command=self.generate_image_from_entry, 
+                                   bg="#ff8000", fg="white", font=("Consolas", 13), width=15)
+        generate_img_btn.grid(row=0, column=4, padx=5)
+        
         self.is_muted = False
         # Welcome message
-        self.log_message("NORA", "Hello! I am NORA. How can I help you today?")
-        self.speak("Hello! I am NORA. How can I help you today?")
+        self.log_message("NORA", "Hello! I am NORA. How can I help you today? I can also generate images for you!")
+        self.speak("Hello! I am NORA. How can I help you today? I can also generate images for you!")
     
     def log_message(self, sender, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -153,6 +204,171 @@ class NoraInterface:
     
     def clear_response(self):
         self.response_text.delete(1.0, tk.END)
+    
+    def clear_image(self):
+        self.image_label.configure(image="", text="No image generated yet")
+        self.current_image = None
+    
+    def save_current_image(self):
+        if self.current_image:
+            filename = f"nora_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            self.current_image.save(filename)
+            self.log_message("NORA", f"Image saved as {filename}")
+            self.speak(f"Image saved as {filename}")
+        else:
+            self.log_message("NORA", "No image to save")
+            self.speak("No image to save")
+    
+    def generate_image_from_entry(self):
+        """Generate image from the current text in the command entry"""
+        prompt = self.command_entry.get().strip()
+        if prompt:
+            self.generate_image(prompt)
+        else:
+            self.log_message("NORA", "Please enter a description for the image")
+            self.speak("Please enter a description for the image")
+    
+    def generate_image_openai(self, prompt):
+        """Generate image using OpenAI DALL-E API"""
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            }
+            
+            data = {
+                "model": "dall-e-3",
+                "prompt": prompt,
+                "n": 1,
+                "size": "1024x1024",
+                "response_format": "b64_json"
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/images/generations",
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                image_data = base64.b64decode(result['data'][0]['b64_json'])
+                return Image.open(io.BytesIO(image_data))
+            else:
+                return None
+                
+        except Exception as e:
+            self.log_message("SYSTEM", f"OpenAI API error: {str(e)}")
+            return None
+    
+    def generate_image_stability(self, prompt):
+        """Generate image using Stability AI API"""
+        try:
+            url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
+            
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {STABILITY_API_KEY}",
+            }
+            
+            data = {
+                "text_prompts": [
+                    {
+                        "text": prompt,
+                        "weight": 1
+                    }
+                ],
+                "cfg_scale": 7,
+                "height": 1024,
+                "width": 1024,
+                "steps": 20,
+                "samples": 1,
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=60)
+            
+            if response.status_code == 200:
+                result = response.json()
+                image_data = base64.b64decode(result['artifacts'][0]['base64'])
+                return Image.open(io.BytesIO(image_data))
+            else:
+                return None
+                
+        except Exception as e:
+            self.log_message("SYSTEM", f"Stability AI API error: {str(e)}")
+            return None
+    
+    def generate_image_huggingface(self, prompt):
+        """Generate image using Hugging Face API"""
+        try:
+            API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+            headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+            
+            data = {"inputs": prompt}
+            
+            response = requests.post(API_URL, headers=headers, json=data, timeout=60)
+            
+            if response.status_code == 200:
+                return Image.open(io.BytesIO(response.content))
+            else:
+                return None
+                
+        except Exception as e:
+            self.log_message("SYSTEM", f"Hugging Face API error: {str(e)}")
+            return None
+    
+    def generate_image(self, prompt):
+        """Main image generation function"""
+        self.log_message("USER", f"Generate image: {prompt}")
+        self.status_label.config(text="Status: Generating image...", fg="#ff8000")
+        self.root.update()
+        
+        def generate_thread():
+            try:
+                image = None
+                
+                # Try different APIs in order of preference
+                if OPENAI_API_KEY != "your_openai_api_key_here":
+                    image = self.generate_image_openai(prompt)
+                
+                if not image and STABILITY_API_KEY != "your_stability_api_key_here":
+                    image = self.generate_image_stability(prompt)
+                
+                if not image and HUGGINGFACE_API_KEY != "your_huggingface_api_key_here":
+                    image = self.generate_image_huggingface(prompt)
+                
+                if image:
+                    # Resize image to fit display area
+                    display_size = (400, 400)
+                    image.thumbnail(display_size, Image.Resampling.LANCZOS)
+                    
+                    # Convert to PhotoImage for display
+                    photo = ImageTk.PhotoImage(image)
+                    
+                    # Update UI in main thread
+                    self.root.after(0, lambda: self.display_image(photo, image))
+                    self.root.after(0, lambda: self.log_message("NORA", f"Image generated successfully for: {prompt}"))
+                    self.root.after(0, lambda: self.speak("Image generated successfully"))
+                else:
+                    self.root.after(0, lambda: self.log_message("NORA", "Failed to generate image. Please check your API keys."))
+                    self.root.after(0, lambda: self.speak("Failed to generate image. Please check your API keys."))
+                
+            except Exception as e:
+                self.root.after(0, lambda: self.log_message("SYSTEM", f"Image generation error: {str(e)}"))
+                self.root.after(0, lambda: self.speak("Image generation failed"))
+            
+            finally:
+                self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
+        
+        threading.Thread(target=generate_thread, daemon=True).start()
+    
+    def display_image(self, photo, original_image):
+        """Display the generated image in the UI"""
+        self.image_label.configure(image=photo, text="")
+        self.image_label.image = photo  # Keep a reference
+        self.current_image = original_image
     
     def listen_voice(self):
         recognizer = sr.Recognizer()
@@ -230,8 +446,21 @@ class NoraInterface:
     def execute_command(self, command):
         command = command.lower().strip()
         
+        # Image generation commands
+        if any(phrase in command for phrase in ["generate image", "create image", "make image", "draw image", "generate picture", "create picture", "make picture"]):
+            # Extract the description from the command
+            image_prompt = command
+            for phrase in ["generate image of", "create image of", "make image of", "draw image of", "generate picture of", "create picture of", "make picture of", "generate image", "create image", "make image", "draw image", "generate picture", "create picture", "make picture"]:
+                image_prompt = image_prompt.replace(phrase, "").strip()
+            
+            if image_prompt:
+                self.generate_image(image_prompt)
+                return f"Generating image: {image_prompt}"
+            else:
+                return "Please specify what image you want me to generate."
+        
         # Greeting commands
-        if any(word in command for word in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
+        elif any(word in command for word in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
             return "Hi there! How can I assist you today?"
         
         # Open applications
@@ -294,12 +523,10 @@ class NoraInterface:
         
         elif "control panel" in command:
             try:
-              subprocess.Popen("control")
-              return "Opening Control Panel."
+                subprocess.Popen("control")
+                return "Opening Control Panel."
             except Exception as e:
-              return f"Failed to open Control Panel: {e}"
-            except Exception as e:
-                return f"Error opening Control Panel: {str(e)}"
+                return f"Failed to open Control Panel: {e}"
         
         # System commands
         elif any(phrase in command for phrase in ["take screenshot", "screenshot", "capture screen"]):
