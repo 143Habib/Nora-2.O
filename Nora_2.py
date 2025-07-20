@@ -14,19 +14,257 @@ import subprocess
 from PIL import Image, ImageTk
 import io
 import base64
+import json
+import hashlib
 
 # ------------------- CONFIG -------------------
 GROQ_API_KEY = "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"  
 GROQ_MODEL = "llama3-8b-8192"
 
-# Add your image generation API key here 
-OPENAI_API_KEY = "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"  # For DALL-E
-STABILITY_API_KEY = "sk-Q7VR50R8lspjkXB9WhDVgMfFr15lIoLiuAI9zhbhAEPs8Ocl"  # For Stable Diffusion
-HUGGINGFACE_API_KEY = "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"  # For Hugging Face models
+# Add your image generation API key here (choose one of these services)
+OPENAI_API_KEY = "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"  # For DALL-E
+STABILITY_API_KEY = "sk-r82g2W6XRfBKHJ2GZYFJx0MNi65DRc0Y5rFEejsG1KvwV4pD"  # For Stable Diffusion
+HUGGINGFACE_API_KEY = "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"  # For Hugging Face models
+
+USERS_FILE = "users.json"
 # ----------------------------------------------
 
-class NoraInterface:
+# ---------------- User Manager ---------------- #
+class UserManager:
     def __init__(self):
+        self.users_file = USERS_FILE
+        self.ensure_users_file()
+
+    def ensure_users_file(self):
+        if not os.path.exists(self.users_file):
+            with open(self.users_file, 'w') as f:
+                json.dump({}, f)
+
+    def hash_password(self, password):
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    def load_users(self):
+        try:
+            with open(self.users_file, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def save_users(self, users):
+        with open(self.users_file, 'w') as f:
+            json.dump(users, f, indent=2)
+
+    def register_user(self, username, name, phone, password):
+        users = self.load_users()
+        if username in users:
+            return False, "Username already exists!"
+
+        users[username] = {
+            "name": name,
+            "phone": phone,
+            "password": self.hash_password(password),
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        self.save_users(users)
+        return True, "Registration successful!"
+
+    def login_user(self, username, password):
+        users = self.load_users()
+        if username not in users:
+            return False, "Username not found!"
+        if users[username]["password"] != self.hash_password(password):
+            return False, "Incorrect password!"
+        return True, users[username]
+
+# ---------------- Login Window ---------------- #
+class LoginWindow:
+    def __init__(self, callback):
+        self.callback = callback
+        self.user_manager = UserManager()
+        self.root = tk.Tk()
+        self.root.title("NORA - Login")
+        self.root.geometry("500x600")
+        self.root.configure(bg="#000000")
+        self.root.resizable(False, False)
+
+        # Center the window
+        self.root.geometry("+{}+{}".format(
+            (self.root.winfo_screenwidth() // 2) - 250,
+            (self.root.winfo_screenheight() // 2) - 300
+        ))
+
+        self.main_frame = tk.Frame(self.root, bg="#000000")
+        self.main_frame.pack(expand=True, fill="both", padx=30, pady=20)
+        self.setup_ui()
+
+    def setup_ui(self):
+        title = tk.Label(self.root, text="N.O.R.A", font=("Orbitron", 32, "bold"),
+                         fg="#00ffe0", bg="#000000")
+        title.pack(pady=30)
+
+        subtitle = tk.Label(self.root, text="Neural Operations & Response Assistant",
+                            font=("Consolas", 12), fg="#00ffcc", bg="#000000")
+        subtitle.pack(pady=(0, 20))
+
+        self.show_login_form()
+
+    def clear_frame(self):
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+
+    def show_login_form(self):
+        self.clear_frame()
+
+        tk.Label(self.main_frame, text="Login to NORA",
+                 font=("Consolas", 18, "bold"), fg="#00ffe0", bg="#000000").pack(pady=20)
+
+        tk.Label(self.main_frame, text="Username:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.login_username = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                       bg="#111111", fg="#ffffff", insertbackground='white')
+        self.login_username.pack(pady=(0, 10))
+
+        tk.Label(self.main_frame, text="Password:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.login_password = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                       bg="#111111", fg="#ffffff", show="*", insertbackground='white')
+        self.login_password.pack(pady=(0, 20))
+
+        # Bind Enter key to login
+        self.login_username.bind('<Return>', lambda event: self.login())
+        self.login_password.bind('<Return>', lambda event: self.login())
+
+        tk.Button(self.main_frame, text="Login", command=self.login,
+                  bg="#00ffe0", fg="black", font=("Consolas", 14, "bold"),
+                  width=20, height=2).pack(pady=10)
+
+        tk.Button(self.main_frame, text="New User? Register",
+                  command=self.show_register_form,
+                  bg="#ff6b00", fg="white", font=("Consolas", 12),
+                  width=20).pack(pady=5)
+
+        self.login_username.focus()
+
+    def show_register_form(self):
+        self.clear_frame()
+
+        tk.Label(self.main_frame, text="Register for NORA",
+                 font=("Consolas", 18, "bold"), fg="#00ffe0", bg="#000000").pack(pady=20)
+
+        # Full Name
+        tk.Label(self.main_frame, text="Full Name:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.reg_name = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                 bg="#111111", fg="#ffffff", insertbackground='white')
+        self.reg_name.pack(pady=(0, 10))
+
+        # Phone Number
+        tk.Label(self.main_frame, text="Phone Number:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.reg_phone = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                  bg="#111111", fg="#ffffff", insertbackground='white')
+        self.reg_phone.pack(pady=(0, 10))
+
+        # Username
+        tk.Label(self.main_frame, text="Username:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.reg_username = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                     bg="#111111", fg="#ffffff", insertbackground='white')
+        self.reg_username.pack(pady=(0, 10))
+
+        # Password
+        tk.Label(self.main_frame, text="Password:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.reg_password = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                     bg="#111111", fg="#ffffff", show="*", insertbackground='white')
+        self.reg_password.pack(pady=(0, 10))
+
+        # Confirm Password
+        tk.Label(self.main_frame, text="Confirm Password:", font=("Consolas", 12),
+                 fg="#00ffcc", bg="#000000").pack(pady=(5, 2))
+        self.reg_confirm = tk.Entry(self.main_frame, font=("Consolas", 12),
+                                    bg="#111111", fg="#ffffff", show="*", insertbackground='white')
+        self.reg_confirm.pack(pady=(0, 20))
+
+        # Register Button
+        tk.Button(self.main_frame, text="Register", command=self.register,
+                  bg="#00ff80", fg="black", font=("Consolas", 14, "bold"),
+                  width=20, height=2).pack(pady=10)
+
+        # Back to Login Button
+        tk.Button(self.main_frame, text="Back to Login", command=self.show_login_form,
+                  bg="#4000ff", fg="white", font=("Consolas", 12),
+                  width=20).pack(pady=5)
+
+        self.reg_name.focus()
+
+    def validate_registration(self):
+        name = self.reg_name.get().strip()
+        phone = self.reg_phone.get().strip()
+        username = self.reg_username.get().strip()
+        password = self.reg_password.get().strip()
+        confirm = self.reg_confirm.get().strip()
+
+        if not all([name, phone, username, password, confirm]):
+            return False, "All fields are required!"
+
+        if len(name) < 2:
+            return False, "Name must be at least 2 characters!"
+        if len(phone) < 10 or not phone.replace('+', '').replace('-', '').replace(' ', '').isdigit():
+            return False, "Invalid phone number!"
+        if len(username) < 3:
+            return False, "Username must be at least 3 characters!"
+        if len(password) < 6:
+            return False, "Password must be at least 6 characters!"
+        if password != confirm:
+            return False, "Passwords do not match!"
+
+        return True, "Valid"
+
+    def register(self):
+        valid, message = self.validate_registration()
+        if not valid:
+            messagebox.showerror("Registration Error", message)
+            return
+
+        name = self.reg_name.get().strip()
+        phone = self.reg_phone.get().strip()
+        username = self.reg_username.get().strip()
+        password = self.reg_password.get().strip()
+
+        success, message = self.user_manager.register_user(username, name, phone, password)
+
+        if success:
+            messagebox.showinfo("Success", message)
+            self.show_login_form()
+            self.root.after(100, lambda: self.login_username.insert(0, username))
+        else:
+            messagebox.showerror("Error", message)
+
+    def login(self):
+        username = self.login_username.get().strip()
+        password = self.login_password.get().strip()
+
+        if not username or not password:
+            messagebox.showerror("Login Error", "Please enter both username and password!")
+            return
+
+        success, user = self.user_manager.login_user(username, password)
+        if success:
+            messagebox.showinfo("Login Success", f"Welcome back, {user['name']}!")
+            self.root.destroy()
+            self.callback(user)
+        else:
+            messagebox.showerror("Login Failed", user)
+
+    def run(self):
+        self.root.mainloop()
+
+# ---------------- Main NORA Interface ---------------- #
+class NoraInterface:
+    def __init__(self, user_info):
+        self.user_info = user_info
         self.root = tk.Tk()
         self.root.title("N.O.R.A Interface")
         self.root.geometry("1400x800")  # Made wider for image display
@@ -40,10 +278,25 @@ class NoraInterface:
         self.setup_ui()
         
     def setup_ui(self):
-        # ======= Top Label =======
-        title = tk.Label(self.root, text="N.O.R.A", 
+        # ======= Top Section with Title and User Info =======
+        top_frame = tk.Frame(self.root, bg="#000000")
+        top_frame.pack(pady=10, fill="x")
+        
+        title = tk.Label(top_frame, text="N.O.R.A", 
                         font=("Orbitron", 26), fg="#00ffe0", bg="#000000")
-        title.pack(pady=10)
+        title.pack()
+        
+        # User info and logout
+        user_frame = tk.Frame(top_frame, bg="#000000")
+        user_frame.pack(pady=5)
+        
+        user_label = tk.Label(user_frame, text=f"Welcome, {self.user_info['name']}", 
+                             font=("Consolas", 12), fg="#00ffcc", bg="#000000")
+        user_label.pack(side="left")
+        
+        logout_btn = tk.Button(user_frame, text="Logout", command=self.logout,
+                              bg="#ff4444", fg="white", font=("Consolas", 10), width=10)
+        logout_btn.pack(side="right", padx=(20, 0))
         
         # ======= Status Frame =======
         status_frame = tk.Frame(self.root, bg="#000000")
@@ -66,13 +319,17 @@ class NoraInterface:
                                 fg="#00ffe0", bg="#000000", font=("Consolas", 14))
         response_label.pack(anchor="w")
         
-        self.response_text = tk.Text(left_frame, height=15, width=80, 
+        # Create text widget with scrollbar
+        text_frame = tk.Frame(left_frame, bg="#000000")
+        text_frame.pack(fill="both", expand=True, pady=10)
+        
+        self.response_text = tk.Text(text_frame, height=15, width=80, 
                                    bg="#0d0d0d", fg="#00ffcc", font=("Consolas", 11), 
                                    borderwidth=2, relief="solid")
-        self.response_text.pack(pady=10, fill="both", expand=True)
+        self.response_text.pack(side="left", fill="both", expand=True)
         
         # Add scrollbar for text
-        scrollbar = tk.Scrollbar(left_frame, command=self.response_text.yview)
+        scrollbar = tk.Scrollbar(text_frame, command=self.response_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.response_text.config(yscrollcommand=scrollbar.set)
         
@@ -150,12 +407,19 @@ class NoraInterface:
         
         self.is_muted = False
         # Welcome message
-        self.log_message("NORA", "Hello! I am NORA. How can I help you today? I can also generate images for you!")
-        self.speak("Hello! I am NORA. How can I help you today? I can also generate images for you!")
+        self.log_message("NORA", f"Hello {self.user_info['name']}! I am NORA. How can I help you today? I can also generate images for you!")
+        self.speak(f"Hello {self.user_info['name']}! I am NORA. How can I help you today? I can also generate images for you!")
+    
+    def logout(self):
+        """Handle logout functionality"""
+        if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
+            self.root.destroy()
+            # Restart the login window
+            LoginWindow(launch_nora_interface).run()
     
     def log_message(self, sender, message):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.response_text.insert(tk.END, f"[{timestamp}] {sender}: {message}\n")
+        #timestamp = datetime.now().strftime("%H:%M:%S")
+        self.response_text.insert(tk.END, f"{sender}: {message}\n")
         self.response_text.see(tk.END)
         self.root.update()
     
@@ -363,7 +627,6 @@ class NoraInterface:
                 self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
         
         threading.Thread(target=generate_thread, daemon=True).start()
-    
     def display_image(self, photo, original_image):
         """Display the generated image in the UI"""
         self.image_label.configure(image=photo, text="")
@@ -372,94 +635,97 @@ class NoraInterface:
     
     def listen_voice(self):
         recognizer = sr.Recognizer()
-        try:
-            with sr.Microphone() as source:
-                self.status_label.config(text="Status: Listening...", fg="#ffff00")
-                self.root.update()
-                
-                recognizer.adjust_for_ambient_noise(source, duration=1)
-                audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
-                
-                self.status_label.config(text="Status: Processing...", fg="#ff8000")
-                self.root.update()
-                
+        with sr.Microphone() as source:
+            self.status_label.config(text="Status: Listening...", fg="#ff8000")
+            self.voice_btn.config(text="🛑 Stop Listening")
+            try:
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
                 command = recognizer.recognize_google(audio)
-                self.log_message("USER", f"Voice: {command}")
-                
+                self.command_entry.delete(0, tk.END)
+                self.command_entry.insert(0, command)
+                self.run_command()
+            except sr.WaitTimeoutError:
+                self.log_message("NORA", "Listening timed out. Try again.")
+                self.speak("Listening timed out. Try again.")
+            except sr.UnknownValueError:
+                self.log_message("NORA", "Sorry, I didn't catch that.")
+                self.speak("Sorry, I didn't catch that.")
+            except Exception as e:
+                self.log_message("SYSTEM", f"Voice input error: {str(e)}")
+                self.speak("Voice input error occurred.")
+            finally:
                 self.status_label.config(text="Status: Ready", fg="#00ff00")
-                return command
-                
-        except sr.UnknownValueError:
-            self.log_message("SYSTEM", "Could not understand audio")
-            self.status_label.config(text="Status: Ready", fg="#00ff00")
-            return ""
-        except sr.RequestError as e:
-            self.log_message("SYSTEM", f"Recognition service error: {str(e)}")
-            self.status_label.config(text="Status: Ready", fg="#00ff00")
-            return ""
-        except sr.WaitTimeoutError:
-            self.log_message("SYSTEM", "Listening timed out")
-            self.status_label.config(text="Status: Ready", fg="#00ff00")
-            return ""
-        except Exception as e:
-            self.log_message("SYSTEM", f"Voice recognition error: {str(e)}")
-            self.status_label.config(text="Status: Ready", fg="#00ff00")
-            return ""
-    
+                self.voice_btn.config(text="🎙️ Voice Input")
+                self.is_listening = False
+
     def toggle_voice_input(self):
         if not self.is_listening:
             self.is_listening = True
-            self.voice_btn.config(text="⏹️ Stop Listening", bg="#ff0000")
-            threading.Thread(target=self.voice_input_loop, daemon=True).start()
+            threading.Thread(target=self.listen_voice, daemon=True).start()
         else:
             self.is_listening = False
-            self.voice_btn.config(text="🎙️ Voice Input", bg="#ff6b00")
+            self.status_label.config(text="Status: Ready", fg="#00ff00")
+            self.voice_btn.config(text="🎙️ Voice Input")
+    def run_command(self):
+        command = self.command_entry.get().strip()
+        if not command:
+            self.log_message("NORA", "Please enter a command.")
+            self.speak("Please enter a command.")
+            return
+
+        self.log_message("USER", command)
+        self.status_label.config(text="Status: Thinking...", fg="#ff8000")
+        self.root.update()
+
+        def query_ai():
+            try:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {GROQ_API_KEY}"
+                }
+                data = {
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are NORA, a helpful AI assistant."},
+                        {"role": "user", "content": command}
+                    ]
+                }
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=60
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    reply = result['choices'][0]['message']['content']
+                    self.root.after(0, lambda: self.log_message("NORA", reply))
+                    self.root.after(0, lambda: self.speak(reply))
+                else:
+                    self.root.after(0, lambda: self.log_message("NORA", "Failed to get response."))
+                    self.root.after(0, lambda: self.speak("Sorry, I couldn't process that."))
+            except Exception as e:
+                self.root.after(0, lambda: self.log_message("SYSTEM", f"Error: {str(e)}"))
+                self.root.after(0, lambda: self.speak("An error occurred."))
+            finally:
+                self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
+
+        threading.Thread(target=query_ai, daemon=True).start()
     
-    def voice_input_loop(self):
-        while self.is_listening:
-            command = self.listen_voice()
-            if command.strip():
-                # Update the command entry with the voice input
-                self.root.after(0, lambda: self.command_entry.delete(0, tk.END))
-                self.root.after(0, lambda: self.command_entry.insert(0, command))
-                # Process the command
-                self.root.after(0, lambda: self.process_command(command))
-    
-    def ask_groq(self, prompt):
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GROQ_API_KEY}"
-        }
-        body = {
-            "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7
-        }
-        try:
-            response = requests.post("https://api.groq.com/openai/v1/chat/completions", 
-                                   headers=headers, json=body)
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            return f"Error contacting Groq API: {str(e)}"
-    
-    def execute_command(self, command):
-        command = command.lower().strip()
-        
-        # Image generation commands
-        if any(phrase in command for phrase in ["generate image", "create image", "make image", "draw image", "generate picture", "create picture", "make picture"]):
-            # Extract the description from the command
-            image_prompt = command
-            for phrase in ["generate image of", "create image of", "make image of", "draw image of", "generate picture of", "create picture of", "make picture of", "generate image", "create image", "make image", "draw image", "generate picture", "create picture", "make picture"]:
-                image_prompt = image_prompt.replace(phrase, "").strip()
-            
-            if image_prompt:
-                self.generate_image(image_prompt)
-                return f"Generating image: {image_prompt}"
-            else:
-                return "Please specify what image you want me to generate."
-        
-        # Greeting commands
+    def run(self):
+        self.root.mainloop()
+
+# ---------------- Launcher ---------------- #
+def launch_nora_interface(user_info):
+    NoraInterface(user_info).run()
+
+# Start the application
+if __name__ == "__main__":
+    LoginWindow(launch_nora_interface).run()
+
+"""I have to add this also
+ # Greeting commands
         elif any(word in command for word in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
             return "Hi there! How can I assist you today?"
         
@@ -595,40 +861,4 @@ class NoraInterface:
             self.root.after(1000, self.root.destroy)  # Delay to allow speech to finish
             return "Goodbye! Have a nice day."
         
-        return None
-    
-    def process_command(self, command):
-        if not command.strip():
-            return
-            
-        self.log_message("USER", command)
-        
-        # Try local command first
-        local_response = self.execute_command(command)
-        if local_response:
-            self.log_message("NORA", local_response)
-            self.speak(local_response)
-        else:
-            # Use Groq API for general queries
-            self.status_label.config(text="Status: Thinking...", fg="#ff8000")
-            self.root.update()
-            
-            response = self.ask_groq(command)
-            self.log_message("NORA", response)
-            self.speak(response)
-            
-            self.status_label.config(text="Status: Ready", fg="#00ff00")
-    
-    def run_command(self):
-        cmd = self.command_entry.get().strip()
-        if cmd:
-            self.command_entry.delete(0, tk.END)
-            self.process_command(cmd)
-    
-    def run(self):
-        self.root.mainloop()
-
-# ======= Main Execution =======
-if __name__ == "__main__":
-    app = NoraInterface()
-    app.run()
+        return None"""
