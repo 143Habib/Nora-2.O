@@ -18,7 +18,7 @@ import json
 import hashlib
 
 # ------------------- CONFIG -------------------
-GROQ_API_KEY = "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"  
+GROQ_API_KEY = "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"  
 GROQ_MODEL = "llama3-8b-8192"
 
 # Add your image generation API key here (choose one of these services)
@@ -418,7 +418,6 @@ class NoraInterface:
             LoginWindow(launch_nora_interface).run()
     
     def log_message(self, sender, message):
-        #timestamp = datetime.now().strftime("%H:%M:%S")
         self.response_text.insert(tk.END, f"{sender}: {message}\n")
         self.response_text.see(tk.END)
         self.root.update()
@@ -627,6 +626,7 @@ class NoraInterface:
                 self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
         
         threading.Thread(target=generate_thread, daemon=True).start()
+    
     def display_image(self, photo, original_image):
         """Display the generated image in the UI"""
         self.image_label.configure(image=photo, text="")
@@ -666,67 +666,13 @@ class NoraInterface:
             self.is_listening = False
             self.status_label.config(text="Status: Ready", fg="#00ff00")
             self.voice_btn.config(text="🎙️ Voice Input")
-    def run_command(self):
-        command = self.command_entry.get().strip()
-        if not command:
-            self.log_message("NORA", "Please enter a command.")
-            self.speak("Please enter a command.")
-            return
 
-        self.log_message("USER", command)
-        self.status_label.config(text="Status: Thinking...", fg="#ff8000")
-        self.root.update()
-
-        def query_ai():
-            try:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {GROQ_API_KEY}"
-                }
-                data = {
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {"role": "system", "content": "You are NORA, a helpful AI assistant."},
-                        {"role": "user", "content": command}
-                    ]
-                }
-                response = requests.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers=headers,
-                    json=data,
-                    timeout=60
-                )
-
-                if response.status_code == 200:
-                    result = response.json()
-                    reply = result['choices'][0]['message']['content']
-                    self.root.after(0, lambda: self.log_message("NORA", reply))
-                    self.root.after(0, lambda: self.speak(reply))
-                else:
-                    self.root.after(0, lambda: self.log_message("NORA", "Failed to get response."))
-                    self.root.after(0, lambda: self.speak("Sorry, I couldn't process that."))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_message("SYSTEM", f"Error: {str(e)}"))
-                self.root.after(0, lambda: self.speak("An error occurred."))
-            finally:
-                self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
-
-        threading.Thread(target=query_ai, daemon=True).start()
-    
-    def run(self):
-        self.root.mainloop()
-
-# ---------------- Launcher ---------------- #
-def launch_nora_interface(user_info):
-    NoraInterface(user_info).run()
-
-# Start the application
-if __name__ == "__main__":
-    LoginWindow(launch_nora_interface).run()
-
-"""I have to add this also
- # Greeting commands
-        elif any(word in command for word in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
+    def process_local_command(self, command):
+        """Process local commands before sending to AI"""
+        command = command.lower().strip()
+        
+        # Greeting commands
+        if any(word in command for word in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
             return "Hi there! How can I assist you today?"
         
         # Open applications
@@ -861,4 +807,75 @@ if __name__ == "__main__":
             self.root.after(1000, self.root.destroy)  # Delay to allow speech to finish
             return "Goodbye! Have a nice day."
         
-        return None"""
+        return None  # Return None if no local command was processed
+
+    def run_command(self):
+        command = self.command_entry.get().strip()
+        if not command:
+            self.log_message("NORA", "Please enter a command.")
+            self.speak("Please enter a command.")
+            return
+
+        self.log_message("USER", command)
+        self.status_label.config(text="Status: Processing...", fg="#ff8000")
+        self.root.update()
+        
+        # First try to process as local command
+        local_response = self.process_local_command(command)
+        
+        if local_response:
+            # Local command was processed
+            self.log_message("NORA", local_response)
+            self.speak(local_response)
+            self.status_label.config(text="Status: Ready", fg="#00ff00")
+            self.command_entry.delete(0, tk.END)  # Clear the command entry
+        else:
+            # No local command found, send to AI
+            self.status_label.config(text="Status: Thinking...", fg="#ff8000")
+            def query_ai():
+                try:
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {GROQ_API_KEY}"
+                    }
+                    data = {
+                        "model": GROQ_MODEL,
+                        "messages": [
+                            {"role": "system", "content": "You are NORA, a helpful AI assistant."},
+                            {"role": "user", "content": command}
+                        ]
+                    }
+                    response = requests.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers=headers,
+                        json=data,
+                        timeout=60
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        reply = result['choices'][0]['message']['content']
+                        self.root.after(0, lambda: self.log_message("NORA", reply))
+                        self.root.after(0, lambda: self.speak(reply))
+                        self.root.after(0, lambda: self.command_entry.delete(0, tk.END))
+                    else:
+                        self.root.after(0, lambda: self.log_message("NORA", "Failed to get response."))
+                        self.root.after(0, lambda: self.speak("Sorry, I couldn't process that."))
+                except Exception as e:
+                    self.root.after(0, lambda: self.log_message("SYSTEM", f"Error: {str(e)}"))
+                    self.root.after(0, lambda: self.speak("An error occurred."))
+                finally:
+                    self.root.after(0, lambda: self.status_label.config(text="Status: Ready", fg="#00ff00"))
+
+            threading.Thread(target=query_ai, daemon=True).start()
+    
+    def run(self):
+        self.root.mainloop()
+
+# ---------------- Launcher ---------------- #
+def launch_nora_interface(user_info):
+    NoraInterface(user_info).run()
+
+# Start the application
+if __name__ == "__main__":
+    LoginWindow(launch_nora_interface).run()
